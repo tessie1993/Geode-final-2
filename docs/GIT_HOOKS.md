@@ -118,6 +118,60 @@ python -m unittest discover -s tools/hooks -p "test_*.py"
 The whitespace and native-pin hooks intentionally inspect the index even during
 `--all-files`; use the explicit native command above for a full pin audit.
 
+## CI smoke validation
+
+[Pre-commit smoke](../.github/workflows/hooks-smoke.yml) runs on pull requests
+that change hook tooling, its configuration, or this document. It can also be
+started manually with **Run workflow** after the workflow exists on the default
+branch. It needs no hook installation on a contributor's machine. The existing
+Android workflow continues to run its build and quality checks independently.
+
+The smoke job uses Ubuntu 24.04, Python 3.12.14, commit-pinned setup actions,
+pre-commit 4.7.0 from `requirements.txt`, and PyYAML 6.0.3. It validates the
+configuration and Python syntax, runs the offline regression tests, and installs
+the actual environments specified by `.pre-commit-config.yaml`. A fresh,
+job-local cache makes environment installation part of each run. These are
+tool/version pins, not a hash-locked transitive dependency or runner image lock.
+
+`smoke_pre_commit.py` copies the unchanged hook configuration and checker scripts
+into disposable Git repositories. It exercises:
+
+- Passing staged fixtures through every configured hook, plus expected failures
+  for file hygiene, C/C++ formatting and analysis, and CMake linting.
+- Valid staged dependency declarations with invalid unstaged edits, and invalid
+  staged declarations with valid unstaged edits, for catalogs and Gradle files.
+- Partially staged native manifests, gitlink-only changes without a checkout,
+  and unrelated commits with the checkout's existing missing native gitlinks.
+- Kotlin filename filtering (including spaces), staged content, and Gradle exit
+  status propagation using an explicitly substituted **fixture Gradle wrapper**.
+  This verifies the Python bridge; it does **not** execute Gradle or ktlint rules.
+- Installation of a real Git pre-commit hook inside a fixture repository, with
+  rejection of a bad commit followed by acceptance after an explicitly staged fix.
+
+The tests compare index entries and working-tree bytes before and after hook
+runs, including failure cases. They never install a Git hook in the source clone,
+reformat source files, initialize native submodules, or run a full native pin audit.
+
+This is smoke coverage of representative fixtures, **not** repository-wide lint,
+an Android/native build, dependency resolution, cross-platform certification, or
+a complete end-to-end Kotlin check. Full Kotlin checks remain in `android.yml`.
+
+To reproduce in a disposable environment (POSIX; use `Scripts/python.exe` on
+Windows for the offline tests; the smoke fixtures target the Linux CI runner):
+
+```sh
+python3.12 -m venv .venv-hooks
+.venv-hooks/bin/python -m pip install -r tools/hooks/requirements-smoke.txt
+.venv-hooks/bin/python -m pip check
+.venv-hooks/bin/python -m pre_commit validate-config
+.venv-hooks/bin/python -m unittest discover -s tools/hooks -p 'test_*.py' -v
+.venv-hooks/bin/python -m pre_commit install-hooks
+.venv-hooks/bin/python tools/hooks/smoke_pre_commit.py -v
+```
+
+`install-hooks` prepares environments only; it does not activate a Git hook in
+this clone. Cold-cache execution downloads packages and hook repositories.
+
 Update pinned hook versions deliberately with `pre_commit autoupdate`, review
 the configuration diff, and rerun the checks. To uninstall the local hook:
 
